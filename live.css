@@ -1,0 +1,14 @@
+.customer-page header{background:var(--earth);color:var(--cream)}
+.customer-page header .pill{background:#f7f5ed18;color:var(--cream)}
+.live-main{max-width:1120px;margin:0 auto;padding:48px 28px}
+.live-main h1{font-size:50px}.live-main>p{max-width:650px}
+.live-controls{display:flex;gap:12px;margin:28px 0 16px}.live-controls input{flex:1}.live-controls button{flex-shrink:0}
+.live-message{font-size:12px;color:var(--olive);line-height:1.6;margin-bottom:32px}.live-message.error{color:var(--danger)}
+.live-section-title{display:flex;align-items:center;gap:12px;margin:30px 0 18px}.live-section-title h2{margin:0;font-size:20px}.live-section-title span{background:var(--line);padding:5px 10px;border-radius:30px;font-size:11px}
+.live-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.live-card{border:1px solid var(--line);border-radius:18px;padding:24px;background:var(--paper)}
+.live-card.ready{background:var(--olive);color:var(--cream);border-color:var(--olive)}
+.live-card .live-number{font-size:10px;letter-spacing:1px;opacity:.7}.live-card h3{font-family:Georgia,serif;font-weight:400;font-size:29px;margin:14px 0 18px}
+.live-card .live-time{font-size:32px;font-variant-numeric:tabular-nums;display:block;margin:14px 0 6px}.live-card small{font-size:11px;opacity:.75}.live-state{display:inline-block;border:1px solid currentColor;border-radius:30px;padding:8px 12px;font-size:11px}
+.live-footer{margin-top:48px;border-top:1px solid var(--line);padding:24px 0}.live-footer p{font-family:Georgia,serif;font-size:22px;margin-bottom:12px}.live-footer small{display:block;color:var(--muted);font-size:10px;margin-top:8px}
+@media(max-width:600px){.live-main{padding:32px 20px}.live-main h1{font-size:36px}.live-controls{gap:8px}.live-controls button{padding:12px}.live-grid{grid-template-columns:1fr}.customer-page header .brand b{font-size:11px}}
