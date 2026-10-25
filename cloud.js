@@ -4,12 +4,28 @@ let session=null;
 try {session=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');}catch{}
 export const configured=()=>/^https:\/\/[\w-]+\.supabase\.co$/.test(CLOUD_CONFIG.url)&&Boolean(CLOUD_CONFIG.publishableKey);
 export const signedIn=()=>Boolean(session?.access_token);
-async function request(path,{method='GET',body,staff=false}={}){
+export const getAccessToken=()=>session?.access_token||null;
+export async function fetchSharedMenu(){
+  return request('/rest/v1/menu_items?select=id,name,category,description,price,offer_hot_iced,hot_price,iced_price,available,updated_at&order=category.asc,name.asc');
+}
+export async function deleteSharedMenuItem(id){
+  if(!session?.access_token)throw Error('Sign in as approved staff before editing the shared menu.');
+  return request('/rest/v1/menu_items?id=eq.'+encodeURIComponent(id),{method:'DELETE',staff:true});
+}
+export async function saveSharedMenuItem(item){
+  if(!session?.access_token)throw Error('Sign in as approved staff before editing the shared menu.');
+  return request('/rest/v1/menu_items?on_conflict=id',{
+    method:'POST',staff:true,prefer:'resolution=merge-duplicates,return=minimal',
+    body:{...item,updated_at:new Date().toISOString()},
+  });
+}
+async function request(path,{method='GET',body,staff=false,prefer}={}){
   if(!configured())throw Error('Complete config.js with your Supabase project URL and publishable key.');
   if(staff&&session?.expires_at<Date.now()/1000+30)await refreshSession();
   if(staff&&!session?.access_token)throw Error('Sign in to publish customer orders.');
   const headers={apikey:CLOUD_CONFIG.publishableKey,'Content-Type':'application/json'};
   if(staff)headers.Authorization=`Bearer ${session.access_token}`;
+  if(prefer)headers.Prefer=prefer;
   const response=await fetch(CLOUD_CONFIG.url+path,{method,headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
   const data=await response.json().catch(()=>null);
   if(!response.ok)throw Error(data?.msg||data?.message||data?.error_description||`Connection failed (${response.status}).`);
