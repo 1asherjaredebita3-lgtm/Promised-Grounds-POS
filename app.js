@@ -84,6 +84,7 @@ function initializeAnalyticsDates(){
   if(!$('analyticsStart').value)$('analyticsStart').value=shiftDate(today,-29);
   if(!$('adCostDate').value)$('adCostDate').value=today;
 }
+async function removeAdCost(id){if(!confirm('Delete this advertising expense?'))return;try{await deleteAdCost(id);await renderAnalytics();}catch(error){$('analyticsStatus').textContent='Could not delete expense: '+error.message;}}
 function renderProductPie(products){
   const palette=['#556049','#c9a96b','#8b6547','#9b8b78','#6f7f8a','#a44435','#b9a68a','#3e5144'];
   const total=products.reduce((sum,p)=>sum+Number(p.quantity||0),0);
@@ -108,7 +109,7 @@ async function renderAnalytics(){
       stat(money(Number(data.estimated_profit_cents||0)),'Profit after ads · before other costs');
     renderProductPie(data.products||[]);
     $('adCostTotal').textContent=money(Number(data.ad_cost_cents||0));
-    $('analyticsExpenses').innerHTML=(data.expenses||[]).map(item=>`<div class="expense-row"><div><b>${escapeHtml(item.description)}</b><small>${escapeHtml(item.expense_date)}</small></div><strong>${money(Number(item.amount_cents))}</strong></div>`).join('')||'<div class="empty">No advertising costs recorded for this period.</div>';
+    $('analyticsExpenses').innerHTML=(data.expenses||[]).map(item=>`<div class="expense-row"><div><b>${escapeHtml(item.description)}</b><small>${escapeHtml(item.expense_date)}</small></div><strong>${money(Number(item.amount_cents))}</strong><button class="cancel" data-delete-expense="${escapeHtml(item.id)}">Delete</button></div>`).join('')||'<div class="empty">No advertising costs recorded for this period.</div>';
     $('analyticsStatus').textContent=`Showing ${start} to ${end} · Supabase data`;
   }catch(error){$('analyticsStatus').textContent='Could not load analytics: '+error.message;}
 }
@@ -178,6 +179,7 @@ $('counterQueueList').onclick=e=>{const button=e.target.closest('[data-status]')
 $('queueList').onclick=e=>{const button=e.target.closest('[data-status]');if(button)updateOrder(button.dataset.order,button.dataset.status);};
 $('historySearch').oninput=renderHistory;$('historyDate').onchange=renderHistory;$('resetHistory').onclick=()=>{$('historyDate').value='';$('historySearch').value='';renderHistory();};$('historyList').onclick=e=>{const button=e.target.closest('[data-delete-order]');if(button)deleteOrderFromHistory(button.dataset.deleteOrder);};$('exportCsv').onclick=exportCsv;
 $('refreshAnalytics').onclick=renderAnalytics;
+$('analyticsExpenses').onclick=e=>{const button=e.target.closest('[data-delete-expense]');if(button)removeAdCost(button.dataset.deleteExpense);};
 $('analyticsStart').onchange=renderAnalytics;$('analyticsEnd').onchange=renderAnalytics;
 $('adCostForm').onsubmit=submitAdCost;
 $('lateMinutes').value=state.config.lateMinutes;$('lateMinutes').onchange=()=>{const n=Number($('lateMinutes').value);if(Number.isInteger(n)&&n>=1&&n<=120){const next=structuredClone(state);next.config.lateMinutes=n;commit(next);updateTimers();}else $('lateMinutes').value=state.config.lateMinutes;};
