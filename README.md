@@ -64,8 +64,9 @@ The sync key is stored in this browser. Use trusted staff devices and keep the w
 - Export a backup and inspect the CSV.
 
 ## Analytics dashboard
-The Analytics tab reads completed paid orders from Supabase and summarizes product quantities, collected revenue, and advertising costs. Staff must sign in before viewing reports or recording expenses. Orders are included after their latest status has synced to Supabase.
 
-Before using Analytics, run `ANALYTICS-SETUP.sql` once in the Supabase SQL Editor. This creates the staff-protected advertising-cost table and reporting RPC. In Settings → Advertising expenses, enter each ad spend with its date, description, and amount. The Analytics date filters apply to both sales and ad expenses.
+The Analytics tab reads completed paid orders synced to Supabase and summarizes product quantities, collected revenue, production costs, and estimated profit. Staff must sign in before viewing reports or editing product costs.
 
-The report includes collected Cash and GCash orders; unpaid, cancelled, queued, and ready orders are excluded. “Profit after ads” means collected revenue minus recorded advertising costs only. It is not full net profit because ingredient costs, packaging, labor, rent, and other operating costs are not modeled.
+Before using the revised product-cost reporting, run `PRODUCT-COSTS-SETUP.sql` in the Supabase SQL Editor. In Settings → Product costs, enter the cost to make one unit of each menu item and save it. Analytics calculates product cost as quantity sold × the current saved unit cost, and estimated profit as collected revenue minus product cost.
+
+The report includes collected Cash and GCash orders; unpaid, cancelled, queued, and ready orders are excluded. Current saved product costs are applied to historical sales too, so editing a cost will recalculate past date ranges. Estimated profit does not deduct labor, rent, utilities, or other operating costs. The old advertising-cost table, if previously created, is no longer used by the app.
