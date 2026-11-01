@@ -50,3 +50,13 @@ export async function readLiveOrders(){
   return request('/rest/v1/live_orders?select=id,number,first_name,status,created_at,ready_at&order=created_at.asc&limit=250');
 }
 export const refreshDelay=()=>Math.max(10,CLOUD_CONFIG.refreshSeconds||10)*1000;
+
+export async function fetchAnalytics(startDate,endDate){
+  return request('/rest/v1/rpc/get_cafe_analytics',{method:'POST',staff:true,body:{p_start_date:startDate,p_end_date:endDate}});
+}
+export async function saveAdCost(expense){
+  return request('/rest/v1/cafe_ad_costs',{method:'POST',staff:true,prefer:'return=representation',body:expense});
+}
+export async function deleteAdCost(id){
+  return request('/rest/v1/cafe_ad_costs?id=eq.'+encodeURIComponent(id),{method:'DELETE',staff:true,prefer:'return=minimal'});
+}
