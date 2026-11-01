@@ -54,9 +54,9 @@ export const refreshDelay=()=>Math.max(10,CLOUD_CONFIG.refreshSeconds||10)*1000;
 export async function fetchAnalytics(startDate,endDate){
   return request('/rest/v1/rpc/get_cafe_analytics',{method:'POST',staff:true,body:{p_start_date:startDate,p_end_date:endDate}});
 }
-export async function saveAdCost(expense){
-  return request('/rest/v1/cafe_ad_costs',{method:'POST',staff:true,prefer:'return=representation',body:expense});
+export async function fetchProductCosts(){
+  return request('/rest/v1/cafe_product_costs?select=product_id,product_name,cost_cents&order=product_name.asc',{staff:true});
 }
-export async function deleteAdCost(id){
-  return request('/rest/v1/cafe_ad_costs?id=eq.'+encodeURIComponent(id),{method:'DELETE',staff:true,prefer:'return=minimal'});
+export async function saveProductCost(cost){
+  return request('/rest/v1/cafe_product_costs?on_conflict=product_id',{method:'POST',staff:true,prefer:'resolution=merge-duplicates,return=representation',body:cost});
 }

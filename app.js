@@ -1,4 +1,4 @@
-import {configured, signedIn, signIn, signOut, publishOrder, fetchSharedMenu, saveSharedMenuItem, deleteSharedMenuItem, fetchAnalytics, saveAdCost, deleteAdCost} from './cloud.js';
+import {configured, signedIn, signIn, signOut, publishOrder, fetchSharedMenu, saveSharedMenuItem, deleteSharedMenuItem, fetchAnalytics, fetchProductCosts, saveProductCost} from './cloud.js';
 /* PROMISED GROUNDS POS
  * Sections: defaults → storage → rendering → checkout → sync → event wiring.
  * Currency amounts are stored as whole centavos to avoid rounding errors.
@@ -36,6 +36,7 @@ let state;
 try { const saved=localStorage.getItem(STORAGE_KEY); state=saved?JSON.parse(saved):{menu:DEFAULT_MENU,orders:[],config:{url:'',key:'',lateMinutes:10}}; if(!Array.isArray(state.orders)||!Array.isArray(state.menu)||!state.config)throw Error(); }
 catch { state={menu:DEFAULT_MENU,orders:[],config:{url:'',key:'',lateMinutes:10}}; alert('Saved data could not be read. Export or recover your existing browser data before using the POS.'); }
 let cart=[], category='All', editingId=null, syncing=false, cloudSyncing=false;
+const productCosts = new Map();
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toast.timeout);toast.timeout=setTimeout(()=>$('toast').classList.remove('show'),4200);}
 // Never confirm an order if the browser cannot save it.
 function commit(next){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(next));state=next;return true;}catch{toast('Storage is full or unavailable. Order was not saved. Export a backup and retry.');return false;}}
@@ -75,16 +76,42 @@ function renderHistory(){const query=$('historySearch').value.toLowerCase();cons
 function deleteOrderFromHistory(id){const order=state.orders.find(o=>o.id===id);if(!order)return;const approved=confirm(`Delete order ${order.number} from this device's order history and queue? This cannot be undone here. Copies already sent to Google Sheets or the customer live board will not be deleted.`);if(!approved)return;const next=structuredClone(state);next.orders=next.orders.filter(o=>o.id!==id);if(commit(next)){if(cart.some(item=>item.orderId===id))cart=cart.filter(item=>item.orderId!==id);renderAll();toast('Order removed from this device. Google Sheets and live-board copies remain unchanged.');}}
 function renderEditor(){ $('menuEditor').innerHTML=state.menu.map(p=>`<div class="menu-edit-row"><div><b>${escapeHtml(p.name)}</b><small>${escapeHtml(p.category)} · ${p.offerHotIced?`Hot ${money(p.hotPrice)} / Iced ${money(p.icedPrice)}`:money(p.hotPrice??p.icedPrice??p.price)}${p.available?'':' · Unavailable'}</small></div><button class="secondary" data-edit="${escapeHtml(p.id)}">Edit</button></div>`).join('');}
 
-// Analytics: Supabase is the shared source of truth; local browser orders are not used.
+// Analytics: current saved production costs are applied to historical orders too.
 const dateInputValue = stamp => localDay(stamp);
 function shiftDate(dateString,days){const d=new Date(dateString+'T12:00:00+08:00');d.setDate(d.getDate()+days);return dateInputValue(d.getTime());}
 function initializeAnalyticsDates(){
   const today=dateInputValue(Date.now());
   if(!$('analyticsEnd').value)$('analyticsEnd').value=today;
   if(!$('analyticsStart').value)$('analyticsStart').value=shiftDate(today,-29);
-  if(!$('adCostDate').value)$('adCostDate').value=today;
 }
-async function removeAdCost(id){if(!confirm('Delete this advertising expense?'))return;try{await deleteAdCost(id);await renderAnalytics();}catch(error){$('analyticsStatus').textContent='Could not delete expense: '+error.message;}}
+async function loadProductCosts({quiet=false}={}){
+  if(!signedIn()){productCosts.clear();renderProductCosts();return;}
+  try{
+    const rows=await fetchProductCosts();
+    productCosts.clear();
+    (rows||[]).forEach(row=>productCosts.set(String(row.product_id),Number(row.cost_cents)||0));
+    renderProductCosts();
+  }catch(error){if(!quiet)$('productCostMessage').textContent='Could not load product costs: '+error.message;}
+}
+function renderProductCosts(){
+  const editor=$('productCostEditor');if(!editor)return;
+  editor.innerHTML=state.menu.map(product=>`<div class="menu-edit-row cost-edit-row"><div><b>${escapeHtml(product.name)}</b><small>${escapeHtml(product.category)}</small></div><label class="cost-input-label">Cost to make (₱)<input type="number" min="0" step="0.01" inputmode="decimal" data-product-cost="${escapeHtml(product.id)}" value="${productCosts.has(product.id)?(productCosts.get(product.id)/100).toFixed(2):'0.00'}"></label><button class="secondary" data-save-product-cost="${escapeHtml(product.id)}">Save</button></div>`).join('')||'<div class="empty">Add menu items first.</div>';
+  if(!signedIn())$('productCostMessage').textContent='Sign in as approved staff to edit shared product costs.';
+}
+async function submitProductCost(id){
+  if(!signedIn()){$('productCostMessage').textContent='Sign in as approved staff before editing product costs.';return;}
+  const product=state.menu.find(item=>item.id===id);
+  const input=$('productCostEditor').querySelector(`[data-product-cost="${CSS.escape(id)}"]`);
+  if(!product||!input)return;
+  const cost=Math.round(Number(input.value)*100);
+  if(!Number.isSafeInteger(cost)||cost<0){$('productCostMessage').textContent='Enter a valid cost of ₱0.00 or higher.';return;}
+  try{
+    await saveProductCost({product_id:product.id,product_name:product.name,cost_cents:cost});
+    productCosts.set(product.id,cost);
+    $('productCostMessage').textContent=`Saved cost for ${product.name}. Analytics has been updated.`;
+    if(!$('analytics').hidden)await renderAnalytics();
+  }catch(error){$('productCostMessage').textContent='Could not save product cost: '+error.message;}
+}
 function renderProductPie(products){
   const palette=['#556049','#c9a96b','#8b6547','#9b8b78','#6f7f8a','#a44435','#b9a68a','#3e5144'];
   const total=products.reduce((sum,p)=>sum+Number(p.quantity||0),0);
@@ -97,38 +124,23 @@ function renderProductPie(products){
 }
 async function renderAnalytics(){
   initializeAnalyticsDates();
-  if(!signedIn()){$('analyticsStatus').textContent='Sign in as approved staff in Settings to view shared analytics.';$('analyticsStats').innerHTML='';renderProductPie([]);$('analyticsExpenses').innerHTML='';return;}
+  if(!signedIn()){$('analyticsStatus').textContent='Sign in as approved staff in Settings to view shared analytics.';$('analyticsStats').innerHTML='';renderProductPie([]);$('productCostBreakdown').innerHTML='';return;}
   const start=$('analyticsStart').value,end=$('analyticsEnd').value;
   if(!start||!end||end<start){$('analyticsStatus').textContent='Choose a valid date range.';return;}
   $('analyticsStatus').textContent='Loading shared sales data…';
   try{
     const data=await fetchAnalytics(start,end);
     $('analyticsStats').innerHTML=stat(money(Number(data.revenue_cents||0)),'Collected revenue')+
-      stat(Number(data.order_count||0),'Paid orders')+
-      stat(money(Number(data.ad_cost_cents||0)),'Advertising costs')+
-      stat(money(Number(data.estimated_profit_cents||0)),'Profit after ads · before other costs');
+      stat(money(Number(data.product_cost_cents||0)),'Product cost')+
+      stat(money(Number(data.estimated_profit_cents||0)),'Estimated profit')+
+      stat(Number(data.order_count||0),'Paid orders');
     renderProductPie(data.products||[]);
-    $('adCostTotal').textContent=money(Number(data.ad_cost_cents||0));
-    $('analyticsExpenses').innerHTML=(data.expenses||[]).map(item=>`<div class="expense-row"><div><b>${escapeHtml(item.description)}</b><small>${escapeHtml(item.expense_date)}</small></div><strong>${money(Number(item.amount_cents))}</strong><button class="cancel" data-delete-expense="${escapeHtml(item.id)}">Delete</button></div>`).join('')||'<div class="empty">No advertising costs recorded for this period.</div>';
+    $('productCostBreakdown').innerHTML=(data.products||[]).map(product=>`<div class="expense-row"><div><b>${escapeHtml(product.name)}</b><small>${Number(product.quantity||0)} sold · ${money(Number(product.cost_cents||0))} each</small></div><strong>${money(Number(product.total_cost_cents||0))}</strong></div>`).join('')||'<div class="empty">No product sales recorded for this period.</div>';
     $('analyticsStatus').textContent=`Showing ${start} to ${end} · Supabase data`;
   }catch(error){$('analyticsStatus').textContent='Could not load analytics: '+error.message;}
 }
-async function submitAdCost(event){
-  event.preventDefault();
-  if(!signedIn()){ $('adCostMessage').textContent='Sign in as approved staff before recording expenses.';return; }
-  const amount=Math.round(Number($('adCostAmount').value)*100);
-  const expense_date=$('adCostDate').value;
-  const description=$('adCostDescription').value.trim();
-  if(!expense_date||!description||!Number.isSafeInteger(amount)||amount<=0){$('adCostMessage').textContent='Enter a valid date, description, and amount.';return;}
-  try{
-    await saveAdCost({expense_date,description,amount_cents:amount});
-    $('adCostForm').reset();initializeAnalyticsDates();
-    $('adCostMessage').textContent='Advertising cost saved to Supabase.';
-    if(!$('analytics').hidden)await renderAnalytics();
-  }catch(error){$('adCostMessage').textContent='Could not save expense: '+error.message;}
-}
 
-function renderAll(){renderMenu();renderCart();renderQueue();renderHistory();renderEditor();const pending=state.orders.filter(o=>o.syncedAt!==o.updatedAt).length;$('connection').textContent=!state.config.url?'Local mode':pending?`${pending} pending sync`:'Sheets connected';}
+function renderAll(){renderMenu();renderCart();renderQueue();renderHistory();renderEditor();renderProductCosts();const pending=state.orders.filter(o=>o.syncedAt!==o.updatedAt).length;$('connection').textContent=!state.config.url?'Local mode':pending?`${pending} pending sync`:'Sheets connected';}
 function updateTimers(){document.querySelectorAll('[data-timer]').forEach(el=>{const o=state.orders.find(o=>o.id===el.dataset.timer);if(!o)return;el.textContent=duration(o);el.classList.toggle('late',!o.readyAt&&(Date.now()-o.createdAt)>state.config.lateMinutes*60000);});$('clock').textContent=new Intl.DateTimeFormat('en-PH',{timeZone:'Asia/Manila',weekday:'short',hour:'numeric',minute:'2-digit'}).format(new Date());}
 function placeOrder(){if(!cart.length)return;const total=subtotal(),payment=$('payment').value,cash=payment==='Cash'?Math.round(Number($('cash').value)*100):null;if(payment==='Cash'&&(!$('cash').value||!Number.isFinite(cash)||cash<total)){toast('Enter enough cash received to complete checkout.');$('cash').focus();return;}const stamp=Date.now();const day=localDay(stamp);const count=state.orders.filter(o=>localDay(o.createdAt)===day).length+1;const order={id:newId(),number:`PG-${day.replaceAll('-','')}-${String(count).padStart(3,'0')}`,customer:$('customer').value.trim(),notes:$('notes').value.trim(),items:structuredClone(cart),total,payment,cash,change:cash===null?null:cash-total,status:'queued',createdAt:stamp,updatedAt:stamp,readyAt:null,collectedAt:null,cancelledAt:null,syncedAt:null};const next=structuredClone(state);next.orders.push(order);if(!commit(next))return;cart=[];['customer','notes','cash'].forEach(id=>$(id).value='');renderAll();toast(`${order.number} saved. Waiting timer started.`);syncOrders();syncLiveOrders();}
 /* Sheets adapter: send a full snapshot of each changed order.
@@ -179,9 +191,8 @@ $('counterQueueList').onclick=e=>{const button=e.target.closest('[data-status]')
 $('queueList').onclick=e=>{const button=e.target.closest('[data-status]');if(button)updateOrder(button.dataset.order,button.dataset.status);};
 $('historySearch').oninput=renderHistory;$('historyDate').onchange=renderHistory;$('resetHistory').onclick=()=>{$('historyDate').value='';$('historySearch').value='';renderHistory();};$('historyList').onclick=e=>{const button=e.target.closest('[data-delete-order]');if(button)deleteOrderFromHistory(button.dataset.deleteOrder);};$('exportCsv').onclick=exportCsv;
 $('refreshAnalytics').onclick=renderAnalytics;
-$('analyticsExpenses').onclick=e=>{const button=e.target.closest('[data-delete-expense]');if(button)removeAdCost(button.dataset.deleteExpense);};
+$('productCostEditor').onclick=e=>{const button=e.target.closest('[data-save-product-cost]');if(button)submitProductCost(button.dataset.saveProductCost);};
 $('analyticsStart').onchange=renderAnalytics;$('analyticsEnd').onchange=renderAnalytics;
-$('adCostForm').onsubmit=submitAdCost;
 $('lateMinutes').value=state.config.lateMinutes;$('lateMinutes').onchange=()=>{const n=Number($('lateMinutes').value);if(Number.isInteger(n)&&n>=1&&n<=120){const next=structuredClone(state);next.config.lateMinutes=n;commit(next);updateTimers();}else $('lateMinutes').value=state.config.lateMinutes;};
 $('sheetUrl').value=state.config.url;$('sheetKey').value=state.config.key;
 $('saveConnection').onclick=()=>{const url=$('sheetUrl').value.trim(),key=$('sheetKey').value.trim();if(url&&!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)){toast('Use the Google Apps Script deployment URL ending in /exec.');return;}if(url&&!key){toast('Enter the matching sync key.');return;}const next=structuredClone(state);next.config.url=url;next.config.key=key;if(commit(next)){toast(url?'Connection saved. Checking pending records…':'Local mode saved.');renderAll();syncOrders();syncLiveOrders();}};
@@ -197,10 +208,10 @@ window.addEventListener('online',()=>{syncOrders();syncLiveOrders();});
 window.addEventListener('storage',event=>{if(event.key===STORAGE_KEY&&event.newValue){try{const saved=JSON.parse(event.newValue);if(Array.isArray(saved.orders)&&Array.isArray(saved.menu)&&saved.config){state=saved;renderAll();}}catch{toast('Could not load changes from another tab.');}}});
 $('staffLogin').onsubmit=async event=>{
   event.preventDefault();$('staffSignIn').disabled=true;
-  try{await signIn($('staffEmail').value.trim(),$('staffPassword').value);$('staffPassword').value='';renderCloudStatus();await syncLiveOrders();}
+  try{await signIn($('staffEmail').value.trim(),$('staffPassword').value);$('staffPassword').value='';renderCloudStatus();await syncLiveOrders();await loadProductCosts();}
   catch(error){$('cloudMessage').textContent=error.message;}
   finally{$('staffSignIn').disabled=false;}
 };
 $('staffSignOut').onclick=async()=>{try{await signOut();}catch{}renderCloudStatus();$('cloudMessage').textContent='Signed out. Existing published orders stay on the customer board.';};
 $('cloudRetry').onclick=()=>{if(!configured()||!signedIn())toast('Complete setup and sign in as staff first.');else syncLiveOrders();};
-initializeAnalyticsDates();renderAll();renderCloudStatus();updateTimers();syncSharedMenu({quiet:true});setInterval(()=>syncSharedMenu({quiet:true}),30000);setInterval(updateTimers,1000);setInterval(syncOrders,30000);setInterval(syncLiveOrders,10000);syncOrders();syncLiveOrders();
+initializeAnalyticsDates();renderAll();renderCloudStatus();loadProductCosts({quiet:true});updateTimers();syncSharedMenu({quiet:true});setInterval(()=>syncSharedMenu({quiet:true}),30000);setInterval(updateTimers,1000);setInterval(syncOrders,30000);setInterval(syncLiveOrders,10000);syncOrders();syncLiveOrders();
