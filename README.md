@@ -62,3 +62,10 @@ The sync key is stored in this browser. Use trusted staff devices and keep the w
 - Mark ready and verify the timer stops.
 - Confirm a Sheets row appears and changes status without duplicating.
 - Export a backup and inspect the CSV.
+
+## Analytics dashboard
+The Analytics tab reads completed paid orders from Supabase and summarizes product quantities, collected revenue, and advertising costs. Staff must sign in before viewing reports or recording expenses. Orders are included after their latest status has synced to Supabase.
+
+Before using Analytics, run `ANALYTICS-SETUP.sql` once in the Supabase SQL Editor. This creates the staff-protected advertising-cost table and reporting RPC. In Settings → Advertising expenses, enter each ad spend with its date, description, and amount. The Analytics date filters apply to both sales and ad expenses.
+
+The report includes collected Cash and GCash orders; unpaid, cancelled, queued, and ready orders are excluded. “Profit after ads” means collected revenue minus recorded advertising costs only. It is not full net profit because ingredient costs, packaging, labor, rent, and other operating costs are not modeled.
